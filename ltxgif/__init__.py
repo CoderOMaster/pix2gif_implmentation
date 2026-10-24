@@ -9,7 +9,7 @@ Modules (import the ones you need; motif.py, train_ltx.py and batch_generate.py 
   motif       MotiF training strategy for the LTX trainer
   gif         loop handling and GIF export
   evaluate    base vs LoRA vs LoRA + MotiF: metrics and blinded review
-  text2gif    prompt -> FLUX.1-schnell first frame (HF API or local) -> LoRA animation -> GIF
+  text2gif    prompt -> first frame (Pollinations free API, HF API or local FLUX) -> LoRA animation -> GIF
   worker      keeps LTX loaded between cell runs (serve_ltx.py runs in the LTX-2 environment)
 """
 from .config import LtxGifConfig
