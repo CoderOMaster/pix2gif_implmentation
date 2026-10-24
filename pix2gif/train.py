@@ -27,6 +27,20 @@ class EMA:
                 self.shadow[k].mul_(d).add_(v.float(), alpha=1 - d)
 
 
+def _enable_checkpointing(unet, mode):
+    """Activation checkpointing for the UNet. diffusers defaults to non-reentrant checkpointing, which checks that the
+    recomputed forward saves exactly the same tensors as the original; under autocast that check can fail with
+    'A different number of tensors was saved'. Reentrant checkpointing recomputes without that check."""
+    if mode == "off":
+        return
+    if mode == "non-reentrant":
+        unet.enable_gradient_checkpointing()
+        return
+    from torch.utils.checkpoint import checkpoint
+    unet.enable_gradient_checkpointing(
+        gradient_checkpointing_func=lambda module, *args: checkpoint(module.__call__, *args, use_reentrant=True))
+
+
 def save_checkpoint(cfg, model, step, ema=None):
     os.makedirs(cfg.out_dir, exist_ok=True)
     half = lambda sd: {k: v.half() if v.dtype == torch.float32 else v for k, v in sd.items()}
@@ -46,7 +60,7 @@ def train(cfg, c, split, perceptual_pretrained=True):
                         num_workers=cfg.num_workers, drop_last=True, pin_memory=dev == "cuda",
                         persistent_workers=cfg.num_workers > 0)
     perceptual = LatentPerceptual(pretrained=perceptual_pretrained).to(dev)
-    model.unet.enable_gradient_checkpointing()
+    _enable_checkpointing(model.unet, cfg.grad_checkpointing)
     params = [p for p in model.parameters() if p.requires_grad]
     # Clip the UNet and the flow branch separately: the perceptual loss is orders of magnitude larger than the
     # diffusion loss, so one joint clip would shrink the UNet's updates whenever FlowNet's gradients are big.

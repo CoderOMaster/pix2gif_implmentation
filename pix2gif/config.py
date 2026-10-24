@@ -37,6 +37,7 @@ class Config:
     use_8bit_adam: bool = True
     use_ema: bool = True
     save_every: int = 1000
+    grad_checkpointing: str = "reentrant"  # "reentrant", "non-reentrant" (diffusers default) or "off"
     num_workers: int = 4
     seed: int = 0
     out_dir: str = "outputs"
