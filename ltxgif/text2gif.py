@@ -13,6 +13,7 @@ from PIL import Image
 
 from . import gif, ltx
 from .tgif import center_square
+from .worker import get_worker
 
 PLAN_PROMPT = """Turn this idea for a short looping animated GIF into two prompts.
 Idea: "{idea}"
@@ -55,11 +56,12 @@ def gemini_image(prompt, api_key, model="gemini-2.5-flash-image"):
 
 def text_to_gif(cfg, api_key, idea=None, scene_prompt=None, motion_prompt=None, lora=None, seed=42,
                 loop="auto", image_model="gemini-2.5-flash-image", text_model="gemini-flash-latest",
-                max_kb=2048, image=None):
+                max_kb=2048, image=None, persistent=True):
     """idea -> (scene_prompt, motion_prompt) -> Gemini first frame -> LTX (+ LoRA) clip -> looping GIF.
 
     Give either `idea` (Gemini writes both prompts) or `scene_prompt` + `motion_prompt` yourself. Pass `image` (a PIL
     image or path) to reuse a first frame you liked and only change the motion. lora=None runs the base model.
+    persistent=True keeps LTX loaded in a background worker between calls (stop it with ltxgif.worker.stop_worker()).
     Returns {"image", "mp4", "gif", "scene_prompt", "motion_prompt", ...}."""
     if not (scene_prompt and motion_prompt):
         if not idea:
@@ -81,9 +83,14 @@ def text_to_gif(cfg, api_key, idea=None, scene_prompt=None, motion_prompt=None, 
         Image.fromarray(center_square(np.asarray(image.convert("RGB")), cfg.size)).save(src)
 
     tag = "base" if lora is None else Path(lora).stem.split("_")[-1]
-    mp4 = ltx.generate(cfg, [{"image": str(src), "prompt": motion_prompt, "seed": seed,
-                              "output": str(out_dir / f"{key}_{tag}.mp4")}],
-                       lora=lora, jobs_file=out_dir / f"{key}_jobs.json")[0]
+    output = out_dir / f"{key}_{tag}_{seed}.mp4"
+    if output.exists():
+        mp4 = str(output)
+    elif persistent:
+        mp4 = get_worker(cfg, lora).generate(src, motion_prompt, seed, output)
+    else:
+        mp4 = ltx.generate(cfg, [{"image": str(src), "prompt": motion_prompt, "seed": seed, "output": str(output)}],
+                           lora=lora, jobs_file=out_dir / f"{key}_jobs.json")[0]
     info = gif.video_to_gif(mp4, mp4.replace(".mp4", ".gif"), cfg.fps, loop=loop, max_kb=max_kb)
     return {"image": str(src), "mp4": mp4, "gif": info["path"], "scene_prompt": scene_prompt,
             "motion_prompt": motion_prompt, **{k: v for k, v in info.items() if k != "path"}}

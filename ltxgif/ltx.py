@@ -141,9 +141,8 @@ def latest_lora(cfg, name):
     return ckpts[-1] if ckpts else None
 
 
-def generate(cfg, jobs, lora=None, lora_strength=1.0, steps=30, quantization=None, jobs_file=None):
-    """Image-to-video with the dev transformer (+ optional LoRA) through LTX's one-stage pipeline, loading the model
-    once for all jobs. jobs: [{"image", "prompt", "seed", "output"}]; outputs are MP4s."""
+def generation_args(cfg, lora=None, lora_strength=1.0, steps=30, quantization=None):
+    """CLI arguments shared by every job of LTX's one-stage pipeline (model paths, size, LoRA, quantisation)."""
     m = model_section(cfg)
     common = ["--transformer-path", m["model_path"], "--text-encoder-path", m["text_encoder_path"],
               "--video-vae-path", m["video_vae_path"], "--audio-vae-path", m["audio_vae_path"],
@@ -153,9 +152,16 @@ def generate(cfg, jobs, lora=None, lora_strength=1.0, steps=30, quantization=Non
         common += ["--lora", Path(lora).resolve(), lora_strength]
     if quantization or vram_preset(cfg)["mode"] == "low":
         common += ["--quantization", quantization or "fp8-cast"]
+    return list(map(str, common))
+
+
+def generate(cfg, jobs, lora=None, lora_strength=1.0, steps=30, quantization=None, jobs_file=None):
+    """Image-to-video with the dev transformer (+ optional LoRA) through LTX's one-stage pipeline, loading the model
+    once for all jobs. jobs: [{"image", "prompt", "seed", "output"}]; outputs are MP4s."""
+    common = generation_args(cfg, lora, lora_strength, steps, quantization)
     jobs = [{**j, "image": str(Path(j["image"]).resolve()), "output": str(Path(j["output"]).resolve())} for j in jobs]
     jobs_file = Path(jobs_file or Path(cfg.work_dir) / "jobs.json")
     jobs_file.parent.mkdir(parents=True, exist_ok=True)
-    jobs_file.write_text(json.dumps({"common": list(map(str, common)), "jobs": jobs}, indent=1))
+    jobs_file.write_text(json.dumps({"common": common, "jobs": jobs}, indent=1))
     uv_python(cfg, REPO_ROOT / "ltxgif" / "batch_generate.py", jobs_file.resolve(), cwd=cfg.ltx_repo)
     return [j["output"] for j in jobs]
