@@ -12,7 +12,8 @@ from diffusers import AutoencoderKL, DDPMScheduler, UNet2DConditionModel
 from transformers import CLIPTextConfig, CLIPTextModel, CLIPTokenizer
 from PIL import Image
 
-from pix2gif import Config, evaluate, generate, load_checkpoint, load_or_build, save_gif, train
+from pix2gif import (Config, evaluate, generate, ground_truth_metrics, load_checkpoint, load_or_build, save_gif,
+                     train, validation_loss)
 from pix2gif.model import assemble
 
 work = tempfile.mkdtemp()
@@ -51,5 +52,7 @@ print("gif:", save_gif(frames, f"{cfg.out_dir}/sample.gif"))
 
 metrics, samples = evaluate(cfg, c, split, n=2, steps=2, clip=False)
 print({k: v for k, v in metrics.items() if k not in ("asked", "measured")})
+print("val loss:", validation_loss(cfg, c, split, n=2))
+print("ground truth:", ground_truth_metrics(cfg, c, split, n=2, steps=2, use_lpips=False))
 shutil.rmtree(work)
 print("SMOKE TEST PASSED")

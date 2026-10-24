@@ -47,6 +47,10 @@ def train(cfg, c, split, perceptual_pretrained=True):
     perceptual = LatentPerceptual(pretrained=perceptual_pretrained).to(dev)
     model.unet.enable_gradient_checkpointing()
     params = [p for p in model.parameters() if p.requires_grad]
+    # Clip the UNet and the flow branch separately: the perceptual loss is orders of magnitude larger than the
+    # diffusion loss, so one joint clip would shrink the UNet's updates whenever FlowNet's gradients are big.
+    unet_params = [p for p in model.unet.parameters() if p.requires_grad]
+    flow_params = [p for n, p in model.named_parameters() if p.requires_grad and not n.startswith("unet.")]
     if cfg.use_8bit_adam:
         import bitsandbytes as bnb
         opt = bnb.optim.AdamW8bit(params, lr=cfg.lr)
@@ -93,7 +97,8 @@ def train(cfg, c, split, perceptual_pretrained=True):
             if (i + 1) % cfg.grad_accum:
                 continue
             scaler.unscale_(opt)
-            torch.nn.utils.clip_grad_norm_(params, 1.0)
+            gn_unet = float(torch.nn.utils.clip_grad_norm_(unet_params, 1.0))
+            gn_flow = float(torch.nn.utils.clip_grad_norm_(flow_params, 1.0))
             scaler.step(opt)
             scaler.update()
             opt.zero_grad(set_to_none=True)
@@ -101,11 +106,11 @@ def train(cfg, c, split, perceptual_pretrained=True):
             if ema:
                 ema.update(model)
             step += 1
-            log.append((loss_ldm.item(), loss_p.item()))
+            log.append((loss_ldm.item(), loss_p.item(), gn_unet, gn_flow))
             if step % 50 == 0:
                 l = np.mean(log[-50:], axis=0)
-                print(f"step {step:>6}/{cfg.max_steps} · ldm {l[0]:.4f} · perceptual {l[1]:.4f} · "
-                      f"{(time.time() - t0) / (step - start):.2f}s/step")
+                print(f"step {step:>6}/{cfg.max_steps} · ldm {l[0]:.4f} · perceptual {l[1]:.1f} · "
+                      f"grad-norm unet {l[2]:.2f} flow {l[3]:.1f} · {(time.time() - t0) / (step - start):.2f}s/step")
             if step % cfg.save_every == 0 or step == cfg.max_steps:
                 save_checkpoint(cfg, model, step, ema)
                 print("  saved", cfg.ckpt_path)

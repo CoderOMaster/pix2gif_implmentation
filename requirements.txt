@@ -11,3 +11,4 @@ requests
 Pillow
 numpy
 matplotlib
+lpips

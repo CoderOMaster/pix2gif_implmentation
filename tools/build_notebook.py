@@ -166,6 +166,29 @@ plt.ylabel("measured flow")
 plt.show()
 ''')
 
+code('''
+#@title 8 · Quality checks: validation loss + comparison with the real next frame
+#@markdown Run with `CHECKPOINT = "base"` once (initial weights, no training) to get the baseline, then with
+#@markdown `"trained"`. Training helps only if the trained numbers beat both the base model and the copy-source baseline.
+from pix2gif import ground_truth_metrics, load_components, validation_loss
+
+CHECKPOINT = "trained"  #@param ["trained", "base"]
+N_PAIRS = 50  #@param {type:"integer"}
+
+if CHECKPOINT == "base":
+    c = load_components(cfg)          # fresh initial weights
+else:
+    load_checkpoint(cfg, c)
+
+vl = validation_loss(cfg, c, split)
+print("validation diffusion loss (fixed noise/timesteps):", {k: round(v, 4) for k, v in vl.items()})
+
+gt = ground_truth_metrics(cfg, c, split, n=N_PAIRS, steps=STEPS, text_cfg=TEXT_CFG, image_cfg=IMAGE_CFG)
+print(f"LPIPS vs real frame  model {gt['lpips_model']:.4f} | copy-source {gt['lpips_copy']:.4f}   (lower is better)")
+print(f"PSNR  vs real frame  model {gt['psnr_model']:.2f} | copy-source {gt['psnr_copy']:.2f}   (higher is better)")
+print(f"mean flow            model {gt['flow_model']:.2f} | real pairs  {gt['flow_true']:.2f}   (should match)")
+''')
+
 nb = {"cells": cells,
       "metadata": {"colab": {"provenance": [], "gpuType": "A100"}, "accelerator": "GPU",
                    "kernelspec": {"name": "python3", "display_name": "Python 3"}, "language_info": {"name": "python"}},
