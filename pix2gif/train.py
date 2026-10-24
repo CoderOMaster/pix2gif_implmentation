@@ -31,7 +31,8 @@ def save_checkpoint(cfg, model, step, ema=None):
     os.makedirs(cfg.out_dir, exist_ok=True)
     half = lambda sd: {k: v.half() if v.dtype == torch.float32 else v for k, v in sd.items()}
     state = {"step": step, "model": half(model.state_dict()), "ema": half(ema.shadow) if ema else None,
-             "config": {"init": cfg.init, "use_warp": cfg.use_warp, "res": cfg.res}}
+             "config": {"init": cfg.init, "use_warp": cfg.use_warp, "flow_residual": cfg.flow_residual,
+                        "res": cfg.res}}
     torch.save(state, cfg.ckpt_path + ".tmp")
     os.replace(cfg.ckpt_path + ".tmp", cfg.ckpt_path)
 

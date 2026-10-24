@@ -120,18 +120,39 @@ class LatentPerceptual(nn.Module):
         return loss
 
 
+def identity_grid(latent):
+    b, _, h, w = latent.shape
+    ys = torch.linspace(-1 + 1 / h, 1 - 1 / h, h, device=latent.device)  # pixel centres, align_corners=False
+    xs = torch.linspace(-1 + 1 / w, 1 - 1 / w, w, device=latent.device)
+    gy, gx = torch.meshgrid(ys, xs, indexing="ij")
+    return torch.stack([gx, gy])[None].expand(b, -1, -1, -1).to(latent.dtype)  # (B, 2, H, W), x first
+
+
 class Pix2Gif(nn.Module):
-    def __init__(self, unet, use_warp=True):
+    """flow_residual=False: FlowNet's output is the sampling grid itself (as in the paper); at init it is random,
+    so the warped latent starts scrambled and the identity must be learned.
+    flow_residual=True: FlowNet predicts an offset added to the identity grid, and its last layer starts at zero,
+    so the warp starts as the identity and only learns motion."""
+    def __init__(self, unet, use_warp=True, flow_residual=True):
         super().__init__()
-        self.unet, self.use_warp = unet, use_warp
+        self.unet, self.use_warp, self.flow_residual = unet, use_warp, flow_residual
         self.interval_embedding = IntervalEmbedding()
         self.flownet = FlowNet(64, in_ch=4)
+        self.identity_warp = False  # diagnostic: bypass FlowNet at inference
+        if flow_residual:
+            nn.init.zeros_(self.flownet.predict_flow0[0].weight)
+            nn.init.zeros_(self.flownet.predict_flow0[0].bias)
 
     def forward(self, noisy, t, text_emb, motion, src_latent):
         ctx = text_emb + self.interval_embedding(motion)   # text + motion condition, also the cross-attn context
         x, warped = [noisy, src_latent], None
         if self.use_warp:
-            warped = warp(src_latent, self.flownet(src_latent, ctx)[0])
+            if self.identity_warp:
+                warped = src_latent
+            else:
+                flow = self.flownet(src_latent, ctx)[0]
+                grid = identity_grid(src_latent) + flow if self.flow_residual else flow
+                warped = warp(src_latent, grid)
             x.append(warped)                                # UNet input: [z_t, source latent, warped latent]
         return self.unet(torch.cat(x, 1), t, encoder_hidden_states=ctx).sample, warped
 
@@ -175,7 +196,7 @@ def assemble(cfg, tokenizer, text_encoder, vae, noise_scheduler, unet):
     text_encoder.requires_grad_(False).eval()
     vae.requires_grad_(False).eval()
     return Components(tokenizer, text_encoder.to(cfg.device), vae.to(cfg.device), noise_scheduler,
-                      Pix2Gif(unet, cfg.use_warp).to(cfg.device), cfg.device)
+                      Pix2Gif(unet, cfg.use_warp, cfg.flow_residual).to(cfg.device), cfg.device)
 
 
 def load_components(cfg):

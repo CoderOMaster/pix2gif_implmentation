@@ -60,6 +60,8 @@ src_img = Image.open(split["val"][0][0])
 smooth = generate(cfg, c, src_img, split["val"][0][2], motions=motion_sweep(5, 16), steps=4,
                   sampler="euler", strength=0.6)
 assert len(smooth) == 5
+assert len(generate(cfg, c, src_img, "x", motions=[3], steps=2, identity_warp=True)) == 1
+assert c.model.identity_warp is False
 print("jitter raw:", jitter_metrics(smooth), "| stabilized:", jitter_metrics(stabilize(smooth)))
 
 metrics, samples = evaluate(cfg, c, split, n=2, steps=2, clip=False)

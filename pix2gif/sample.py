@@ -29,7 +29,8 @@ def motion_sweep(n_frames=8, max_motion=19.0, min_motion=2.0):
 
 @torch.no_grad()
 def generate(cfg, c, image, caption, motions=DEFAULT_MOTIONS, steps=50, seed=1371,
-             text_cfg=7.5, image_cfg=1.8, sampler="euler_a", strength=1.0, shared_noise=True):
+             text_cfg=7.5, image_cfg=1.8, sampler="euler_a", strength=1.0, shared_noise=True,
+             identity_warp=False):
     """One frame per motion value, each generated from the same source image, with 3-way CFG
     [text+image, image only, unconditional].
 
@@ -37,9 +38,11 @@ def generate(cfg, c, image, caption, motions=DEFAULT_MOTIONS, steps=50, seed=137
     sampler="euler": deterministic; with shared noise, neighbouring motion values give neighbouring frames.
     strength < 1: start every frame from the source latent noised to that level (img2img), anchoring all frames to
     the source image; lower = steadier but less motion.
-    Fractional motion values are supported (embedding is interpolated; the prompt uses the rounded value)."""
+    Fractional motion values are supported (embedding is interpolated; the prompt uses the rounded value).
+    identity_warp=True: diagnostic, feeds the unwarped source latent instead of FlowNet's warp."""
     from diffusers import EulerAncestralDiscreteScheduler, EulerDiscreteScheduler
     model, dev = c.model.eval(), cfg.device
+    model.identity_warp = identity_warp
     w, h = image.size
     src = torch.from_numpy(np.array(image.convert("RGB").resize((cfg.res, cfg.res), Image.Resampling.LANCZOS)))
     src = (src.permute(2, 0, 1).float() / 127.5 - 1)[None].to(dev)
@@ -71,6 +74,7 @@ def generate(cfg, c, image, caption, motions=DEFAULT_MOTIONS, steps=50, seed=137
         x = c.vae.decode(lat / c.scale).sample.clamp(-1, 1)
         x = ((x[0].permute(1, 2, 0) + 1) * 127.5).round().byte().cpu().numpy()
         frames.append(Image.fromarray(x).resize((w, h), Image.Resampling.LANCZOS))
+    model.identity_warp = False
     return frames
 
 

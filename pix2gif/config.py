@@ -24,6 +24,7 @@ class Config:
     init: str = "instruct-pix2pix"     # or "sd-1.5"
     vae_id: str = "stabilityai/sd-vae-ft-mse"
     use_warp: bool = True              # False = motion embedding only (no FlowNet / WarpNet)
+    flow_residual: bool = True         # warp = identity + learned offset (False = raw grid, as in the paper)
     perceptual_weight: float = 0.01
     uncond_p: float = 0.05             # CFG dropout: p text-only, p image-only, p both
 
@@ -54,4 +55,5 @@ class Config:
 
     @property
     def ckpt_path(self) -> str:
-        return f"{self.out_dir}/pix2gif_{'warp' if self.use_warp else 'nowarp'}_{self.init}.pt"
+        tag = "nowarp" if not self.use_warp else ("warpres" if self.flow_residual else "warp")
+        return f"{self.out_dir}/pix2gif_{tag}_{self.init}.pt"
