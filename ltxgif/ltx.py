@@ -130,7 +130,8 @@ def train(cfg, name, lambda_motion, steps=None):
     """Train (or resume) one LoRA run. Checkpoints: <run>/checkpoints/lora_weights_step_XXXXX.safetensors;
     validation videos: <run>/samples."""
     path = train_config(cfg, name, lambda_motion, steps)
-    uv_python(cfg, REPO_ROOT / "ltxgif" / "train_ltx.py", path, cwd=Path(cfg.ltx_repo) / "packages" / "ltx-trainer")
+    uv_python(cfg, REPO_ROOT / "ltxgif" / "train_ltx.py", path.resolve(),
+              cwd=Path(cfg.ltx_repo) / "packages" / "ltx-trainer")
 
 
 def latest_lora(cfg, name):
