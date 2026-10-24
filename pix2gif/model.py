@@ -30,13 +30,18 @@ def _predict_flow(i):
 
 
 class IntervalEmbedding(nn.Module):
-    """Integer motion magnitude -> learned 768-d vector, broadcast-added to every CLIP token."""
+    """Motion magnitude -> learned 768-d vector, broadcast-added to every CLIP token.
+    Trained on integers; fractional values linearly interpolate the two neighbouring embeddings (smoother sweeps)."""
     def __init__(self, num_embeddings=1024, dim=768):
         super().__init__()
         self.embedding = nn.Embedding(num_embeddings, dim)
 
     def forward(self, motion):
-        return self.embedding(motion.long().unsqueeze(-1))  # (B, 1, 768)
+        motion = motion.float().clamp(0, self.embedding.num_embeddings - 1)
+        lo = motion.floor().long()
+        hi = (lo + 1).clamp(max=self.embedding.num_embeddings - 1)
+        w = (motion - lo.float())[:, None]
+        return (self.embedding(lo) * (1 - w) + self.embedding(hi) * w).unsqueeze(1)  # (B, 1, 768)
 
 
 class InjectionModule(nn.Module):

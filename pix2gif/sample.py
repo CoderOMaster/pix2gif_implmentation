@@ -22,13 +22,23 @@ def load_checkpoint(cfg, c, use_ema=True):
     return ck["step"]
 
 
+def motion_sweep(n_frames=8, max_motion=19.0, min_motion=2.0):
+    """Evenly spaced (fractional) motion values: more frames = smaller steps between frames."""
+    return [float(m) for m in np.linspace(min_motion, max_motion, n_frames)]
+
+
 @torch.no_grad()
 def generate(cfg, c, image, caption, motions=DEFAULT_MOTIONS, steps=50, seed=1371,
-             text_cfg=7.5, image_cfg=1.8, shared_noise=True):
-    """One frame per motion value, each generated from the same source image.
-    Euler ancestral sampling with 3-way CFG: [text+image, image only, unconditional].
-    shared_noise=True reuses the same seed for every frame, which gives more consistent frames."""
-    from diffusers import EulerAncestralDiscreteScheduler
+             text_cfg=7.5, image_cfg=1.8, sampler="euler_a", strength=1.0, shared_noise=True):
+    """One frame per motion value, each generated from the same source image, with 3-way CFG
+    [text+image, image only, unconditional].
+
+    sampler="euler_a" (paper): ancestral sampling injects fresh noise every step, so frames flicker.
+    sampler="euler": deterministic; with shared noise, neighbouring motion values give neighbouring frames.
+    strength < 1: start every frame from the source latent noised to that level (img2img), anchoring all frames to
+    the source image; lower = steadier but less motion.
+    Fractional motion values are supported (embedding is interpolated; the prompt uses the rounded value)."""
+    from diffusers import EulerAncestralDiscreteScheduler, EulerDiscreteScheduler
     model, dev = c.model.eval(), cfg.device
     w, h = image.size
     src = torch.from_numpy(np.array(image.convert("RGB").resize((cfg.res, cfg.res), Image.Resampling.LANCZOS)))
@@ -36,15 +46,23 @@ def generate(cfg, c, image, caption, motions=DEFAULT_MOTIONS, steps=50, seed=137
     src_lat = c.vae.encode(src).latent_dist.mode()
     null = c.encode_text([""])
     img = torch.cat([src_lat, src_lat, torch.zeros_like(src_lat)])
-    sch = EulerAncestralDiscreteScheduler.from_config(c.noise_scheduler.config, timestep_spacing="linspace")
+    Sched = EulerAncestralDiscreteScheduler if sampler == "euler_a" else EulerDiscreteScheduler
+    sch = Sched.from_config(c.noise_scheduler.config, timestep_spacing="linspace")
     frames = []
     for k, m in enumerate(motions):
         g = torch.Generator(dev).manual_seed(seed if shared_noise else seed + k)
-        txt = torch.cat([c.encode_text([motion_prompt(caption, m)]), null, null])
-        mot = torch.full((3,), int(m), device=dev)
+        txt = torch.cat([c.encode_text([motion_prompt(caption, round(m))]), null, null])
+        mot = torch.full((3,), float(m), device=dev)
         sch.set_timesteps(steps, device=dev)
-        lat = torch.randn(src_lat.shape, generator=g, device=dev) * sch.init_noise_sigma
-        for t in sch.timesteps:
+        noise = torch.randn(src_lat.shape, generator=g, device=dev)
+        start = min(int(round(steps * (1 - strength))), steps - 1)
+        timesteps = sch.timesteps[start:]
+        if start > 0:
+            sch.set_begin_index(start)
+            lat = sch.add_noise(src_lat * c.scale, noise, timesteps[:1])
+        else:
+            lat = noise * sch.init_noise_sigma
+        for t in timesteps:
             inp = sch.scale_model_input(lat, t).repeat(3, 1, 1, 1)
             with torch.autocast(dev, dtype=cfg.dtype):
                 eps, _ = model(inp, t.expand(3), txt, mot, img)

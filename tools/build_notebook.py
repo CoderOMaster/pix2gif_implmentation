@@ -110,17 +110,29 @@ code('''
 #@title 6 · Generate a GIF
 import base64, io, time, requests
 from IPython.display import HTML, display
-from pix2gif import generate, load_checkpoint, save_gif, text_to_image
+from pix2gif import generate, jitter_metrics, load_checkpoint, motion_sweep, save_gif, stabilize, text_to_image
 
 SOURCE = "val"  #@param ["val", "upload", "url", "text"]
 URL = ""  #@param {type:"string"}
 CAPTION = "a cat is dancing."  #@param {type:"string"}
-MOTIONS = "2,4,6,8,11,13,16,19"  #@param {type:"string"}
+PRESET = "smooth"  #@param ["smooth", "paper"]
+#@markdown **smooth**: deterministic sampler, all frames start from the noised source (STRENGTH), more frames with
+#@markdown fractional motion, background stabilisation. **paper**: Euler ancestral, 8 frames, motions 2…19, 4 fps.
+N_FRAMES = 16  #@param {type:"slider", min:4, max:32, step:1}
+MAX_MOTION = 16  #@param {type:"slider", min:4, max:20, step:1}
+STRENGTH = 0.8  #@param {type:"slider", min:0.4, max:1.0, step:0.05}
 STEPS = 50  #@param {type:"slider", min:20, max:100, step:5}
 TEXT_CFG = 7.5  #@param {type:"number"}
 IMAGE_CFG = 1.8  #@param {type:"number"}
-FPS = 4  #@param {type:"integer"}
-BOOMERANG = False  #@param {type:"boolean"}
+FPS = 10  #@param {type:"integer"}
+BOOMERANG = True  #@param {type:"boolean"}
+
+if PRESET == "paper":
+    GEN = dict(motions=[2, 4, 6, 8, 11, 13, 16, 19], sampler="euler_a", strength=1.0)
+    POST_STABILIZE, GIF_FPS = False, 4
+else:
+    GEN = dict(motions=motion_sweep(N_FRAMES, MAX_MOTION), sampler="euler", strength=STRENGTH)
+    POST_STABILIZE, GIF_FPS = True, FPS
 
 
 def show(path, width=256):
@@ -140,12 +152,30 @@ elif SOURCE == "url":
 else:
     image = text_to_image(CAPTION)
 
-frames = generate(cfg, c, image, CAPTION, [int(x) for x in MOTIONS.split(",")], steps=STEPS,
-                  text_cfg=TEXT_CFG, image_cfg=IMAGE_CFG)
-path = save_gif(frames, f"outputs/gif_{int(time.time())}.gif", fps=FPS, boomerang=BOOMERANG)
-print(CAPTION, "->", path)
+frames = generate(cfg, c, image, CAPTION, steps=STEPS, text_cfg=TEXT_CFG, image_cfg=IMAGE_CFG, **GEN)
+if POST_STABILIZE:
+    frames = stabilize(frames)
+path = save_gif(frames, f"outputs/gif_{int(time.time())}.gif", fps=GIF_FPS, boomerang=BOOMERANG)
+print(CAPTION, "->", path, "|", jitter_metrics(frames))
 display(image.resize((256, int(256 * image.height / image.width))))
 show(path)
+''')
+
+code('''
+#@title 6b · Jitter comparison on the same image (paper settings vs smooth variants)
+VARIANTS = {
+    "paper (euler_a, 8 frames)": (dict(motions=[2, 4, 6, 8, 11, 13, 16, 19], sampler="euler_a", strength=1.0), False),
+    "deterministic sampler": (dict(motions=[2, 4, 6, 8, 11, 13, 16, 19], sampler="euler", strength=1.0), False),
+    "+ 16 frames, strength 0.8": (dict(motions=motion_sweep(16, MAX_MOTION), sampler="euler", strength=0.8), False),
+    "+ stabilisation": (dict(motions=motion_sweep(16, MAX_MOTION), sampler="euler", strength=0.8), True),
+}
+for name, (kw, stab) in VARIANTS.items():
+    fr = generate(cfg, c, image, CAPTION, steps=STEPS, text_cfg=TEXT_CFG, image_cfg=IMAGE_CFG, **kw)
+    if stab:
+        fr = stabilize(fr)
+    fps = 4 if "paper" in name else FPS
+    print(f"{name:28s}", jitter_metrics(fr))
+    show(save_gif(fr, f"outputs/cmp_{len(name)}.gif", fps=fps, boomerang="paper" not in name), 192)
 ''')
 
 code('''
