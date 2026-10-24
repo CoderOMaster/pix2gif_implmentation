@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+src/_test/
+*.pt
+*.ckpt
+tgif_pairs/
+*.tar
+.DS_Store
