@@ -50,3 +50,44 @@ save_gif(frames, "outputs/dog.gif")
 pip install -r requirements.txt
 python tests/smoke_test.py   # downloads 8 GIFs, trains tiny models for a few steps on CPU
 ```
+
+---
+
+# LTX-2.5 LoRA + MotiF (image → GIF)
+
+A second approach, in `ltxgif/`: fine-tune the LTX-2.5 image-to-video model with LoRA on curated TGIF clips, adding the
+[MotiF](https://arxiv.org/abs/2412.16153) motion focal loss, then export looping GIFs.
+[Open `ltx_gif_colab.ipynb`](https://colab.research.google.com/github/CoderOMaster/pix2gif_implmentation/blob/ltx-motif/ltx_gif_colab.ipynb)
+on a GPU with at least 32 GB.
+
+* **Data:** TGIF official train/val/test splits → 17-frame 512×512 clips resampled by timestamp (first frame = condition
+  image). Static, duplicated, cut and flickering clips are dropped. Optional Gemini recaptioning into
+  "subject + action + direction + camera" form. TGIF is for non-commercial research only.
+* **Training:** the official [LTX-2 trainer](https://github.com/Lightricks/LTX-2/tree/main/packages/ltx-trainer), with
+  LoRA rank 32 on the video attention layers, first-frame conditioning probability 1.0, video only, lr 5e-5,
+  batch 1 × 4 accumulation, 5,000 steps. Low-VRAM preset (int8) under 70 GB.
+* **MotiF:** RAFT flow → heatmap m in [0, 1] (σ(100·(x − 0.05)), x = |flow| / clip peak) pooled onto the latent token grid
+  (causal temporal grouping). Loss = LTX loss + λ · mean[m² · (v̂ − v)²], implemented as a trainer strategy
+  (`ltxgif/motif.py`) without modifying the LTX-2 checkout.
+* **Evaluation:** base vs LoRA (λ = 0) vs LoRA + MotiF on held-out TGIF and
+  [TI2V-Bench](https://huggingface.co/datasets/wang-sj16/TI2V-Bench): CLIP text / source similarity, motion,
+  flicker, loop gap, plus a blinded side-by-side page for human ratings.
+
+```
+ltxgif/
+  config.py          LtxGifConfig
+  tgif.py            TGIF download, decoding, filters, resampling, MP4 clips, manifests
+  recaption.py       optional Gemini captions
+  heatmaps.py        RAFT → MotiF heatmaps on the latent grid, alignment check
+  ltx.py             model download, VRAM presets, trainer YAML, preprocess / train / generate wrappers
+  motif.py           MotiF strategy for the LTX trainer      (runs in the LTX-2 environment)
+  train_ltx.py       training launcher                      (runs in the LTX-2 environment)
+  batch_generate.py  one-model-load batch inference          (runs in the LTX-2 environment)
+  gif.py             loop handling, GIF export
+  evaluate.py        metrics, blinded review
+tests/ltx_smoke_test.py   CPU test: real TGIF clips, heatmaps, MotiF loss through LTX's own strategy + loader
+```
+
+```bash
+LTX_REPO=/path/to/LTX-2 python tests/ltx_smoke_test.py
+```

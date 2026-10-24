@@ -1,0 +1,12 @@
+torch
+torchvision
+imageio[ffmpeg]
+numpy
+Pillow
+requests
+pyyaml
+pandas
+matplotlib
+transformers
+huggingface_hub
+google-genai

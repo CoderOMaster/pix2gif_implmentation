@@ -5,3 +5,6 @@ __pycache__/
 data/
 outputs/
 .DS_Store
+LTX-2/
+ltx_work/
+models/
