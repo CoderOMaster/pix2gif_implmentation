@@ -1,60 +1,52 @@
-# Pix2Gif implementation (Colab)
+# Pix2Gif
 
-A Colab reimplementation of **Pix2Gif: Motion-Guided Diffusion for GIF Generation** (Kandala, Gao, Yang, Microsoft Research,
-[arXiv 2403.04634](https://arxiv.org/abs/2403.04634)): image + caption + motion magnitude → animated GIF.
+Implementation of [Pix2Gif: Motion-Guided Diffusion for GIF Generation (arXiv:2403.04634)](https://arxiv.org/abs/2403.04634):
+image + caption + motion magnitude → animated GIF.
 
-[Open `Pix2Gif_Replication.ipynb` in Colab](https://colab.research.google.com/github/CoderOMaster/pix2gif_implmentation/blob/main/Pix2Gif_Replication.ipynb), select an **A100** (or L4) runtime, and run cells 1 → 7.
+[Open `pix2gif_colab.ipynb` in Colab](https://colab.research.google.com/github/CoderOMaster/pix2gif_implmentation/blob/main/pix2gif_colab.ipynb).
+Use a GPU runtime (A100 recommended) and run the cells in order.
 
-## Why a reimplementation
+## How it works
 
-* The authors removed the code from [hiteshK03/Pix2Gif](https://github.com/hiteshK03/Pix2Gif) in Sept 2024 (commit `0be59b6`).
-  The last commit that still has it is **`781ca78`**, and the model code here is ported from it.
-* **No trained weights were ever released.** The only checkpoint references in the repo history point to the authors' private machines.
-* The TGIF pair-mining script was never published, so it is rebuilt here from the paper's Algorithm 1.
+* **Conditioning:** caption + `"The optical flow is <n>."` → CLIP embedding. The motion value goes through a learned embedding that is added to it.
+* **Warping:** a small FlowNet predicts a flow field from the source latent and the condition, and the source latent is warped with it.
+* **Denoiser:** a Stable Diffusion UNet with a 12-channel input `[noisy latent, source latent, warped latent]`, initialised from
+  InstructPix2Pix (or SD-1.5). The extra input channels start at zero.
+* **Loss:** diffusion loss + 0.01 × VGG perceptual loss on the warped latent. CFG dropout is 5% text / 5% image / 5% both.
+* **Sampling:** Euler ancestral with 3-way classifier-free guidance (text 7.5, image 1.8), one frame per motion value from the same source image.
+* **Data:** TGIF GIFs, frame pairs labelled with their mean Lucas–Kanade optical flow, keeping 2–20 px and up to 10 pairs per GIF.
 
-So the notebook **rebuilds the dataset and trains the model** at Colab scale.
-
-## Pipeline
-
-| Cell | What it does |
-|---|---|
-| 1 Setup | GPU check, installs, Google Drive mount, clones the official code at `781ca78` for reference |
-| 2 Config | Data scale, init (InstructPix2Pix or SD-1.5), warp on/off (ablation), training hyperparameters |
-| 3 Dataset | Downloads TGIF GIFs, finds Lucas–Kanade motion pairs with flow in [2, 20], ≤10 per GIF, saves in the official JSON format, tars to Drive |
-| 4 Model | FlowNet / WarpNet / InjectionModule / IntervalEmbedding / 4-channel VGG perceptual loss (ported line by line) on a diffusers UNet with a 12-channel input |
-| 5 Train | L_LDM + 0.01·L_perceptual, official CFG dropout, AdamW 1e-4 (8-bit optional), bf16, LitEma, atomic checkpoints, auto-resume |
-| 6 Generate | Official `demo.py` sampling: Euler ancestral, text CFG 7.5 / image CFG 1.8, one frame per motion value from the same source; optional text→first frame (sd-turbo) |
-| 7 Evaluate | Motion coherency (L2 / PCC between requested and measured flow) and CLIPSim on held-out GIFs |
-
-## Fidelity vs. the paper
-
-Faithful: the architecture, prompt template (`"<caption> The optical flow is <words>."`), 12-channel "Warp-concat" input, hybrid conditioning,
-perceptual loss (layers 0/5/10/19/28, λ = 0.01), CFG dropout 5/5/5%, lr 1e-4, 256² resolution, motion range [2, 20], and the sampler settings.
-
-Scaled or changed for Colab: initialised from InstructPix2Pix by default (SD-1.5 is selectable); ~3k GIFs and 5k steps at effective batch 32
-(the paper used 783k pairs, ~24k steps at batch 256 on 16×V100); 8-bit AdamW and gradient checkpointing; the LK threshold and
-feature parameters aren't stated in the paper, so they are chosen here.
-
-## Repo layout
+## Layout
 
 ```
-Pix2Gif_Replication.ipynb   # the Colab notebook (built from src/)
-src/c1_setup.py … c7_eval.py # notebook cells as plain Python
-src/build.py                # rebuilds the notebook: python src/build.py Pix2Gif_Replication.ipynb
-src/test_cpu.py             # runs cells 2–7 on CPU with tiny random models (smoke test, needs network)
+pix2gif/
+  config.py     Config dataclass (data, model, training settings)
+  data.py       TGIF download, optical-flow pair mining, Dataset
+  model.py      motion embedding, FlowNet, warp, perceptual loss, Pix2Gif, model loading
+  train.py      training loop (bf16, 8-bit AdamW, EMA, checkpoint + resume)
+  sample.py     GIF generation, checkpoint loading, text -> first frame
+  evaluate.py   motion RMSE / Pearson r, CLIP similarity
+pix2gif_colab.ipynb   Colab notebook
+tests/smoke_test.py   CPU smoke test with tiny models
+tools/build_notebook.py  regenerates the notebook
 ```
 
-## Status
+## Usage
 
-Every cell passes a CPU smoke test: real TGIF download, train, resume, generate and eval, using tiny random-weight models.
-It has not yet been trained on a GPU at full scale, so there are no quality numbers yet.
+```python
+from pix2gif import Config, load_or_build, load_components, train, generate, save_gif
 
-## Citation
+cfg = Config(n_gifs=3000, max_steps=5000)
+split = load_or_build(cfg)                 # data/tgif_pairs
+c = load_components(cfg)
+train(cfg, c, split)                       # outputs/pix2gif_*.pt
+frames = generate(cfg, c, image, "a dog is running.")
+save_gif(frames, "outputs/dog.gif")
+```
 
-```bibtex
-@misc{kandala2024pix2gif,
-  title={Pix2Gif: Motion-Guided Diffusion for GIF Generation},
-  author={Hitesh Kandala and Jianfeng Gao and Jianwei Yang},
-  year={2024}, eprint={2403.04634}, archivePrefix={arXiv}, primaryClass={cs.CV}
-}
+## Test
+
+```bash
+pip install -r requirements.txt
+python tests/smoke_test.py   # downloads 8 GIFs, trains tiny models for a few steps on CPU
 ```

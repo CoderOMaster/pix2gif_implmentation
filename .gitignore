@@ -1,8 +1,7 @@
 __pycache__/
 *.pyc
-src/_test/
 *.pt
 *.ckpt
-tgif_pairs/
-*.tar
+data/
+outputs/
 .DS_Store
