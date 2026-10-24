@@ -9,6 +9,7 @@ Modules (import the ones you need; motif.py, train_ltx.py and batch_generate.py 
   motif       MotiF training strategy for the LTX trainer
   gif         loop handling and GIF export
   evaluate    base vs LoRA vs LoRA + MotiF: metrics and blinded review
+  text2gif    text -> Gemini first frame -> LoRA animation -> GIF
 """
 from .config import LtxGifConfig
 
