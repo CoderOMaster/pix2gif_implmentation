@@ -23,7 +23,9 @@ VIDEO_LORA_TARGETS = [f"{a}.{p}" for a in ("attn1", "attn2") for p in ("to_q", "
 def run(cmd, cwd=None, env=None):
     """Run a command, streaming its output; raise if it fails."""
     print("$", " ".join(map(str, cmd)), flush=True)
-    p = subprocess.Popen(list(map(str, cmd)), cwd=cwd, env={**os.environ, **(env or {})},
+    # Colab's MPLBACKEND names a notebook-only backend that the LTX environment cannot import.
+    base = {k: v for k, v in os.environ.items() if k != "MPLBACKEND"}
+    p = subprocess.Popen(list(map(str, cmd)), cwd=cwd, env={**base, **(env or {})},
                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     for line in p.stdout:
         sys.stdout.write(line)
