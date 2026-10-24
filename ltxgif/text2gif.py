@@ -31,7 +31,8 @@ def plan_prompts(idea, api_key, model="gemini-flash-latest"):
     from google.genai import types
     schema = types.Schema(type="OBJECT", required=["scene_prompt", "motion_prompt"], properties={
         "scene_prompt": types.Schema(type="STRING"), "motion_prompt": types.Schema(type="STRING")})
-    resp = genai.Client(api_key=api_key).models.generate_content(
+    client = genai.Client(api_key=api_key)   # keep a reference: the client closes its connection when collected
+    resp = client.models.generate_content(
         model=model, contents=PLAN_PROMPT.format(idea=idea),
         config=types.GenerateContentConfig(response_mime_type="application/json", response_schema=schema))
     return json.loads(resp.text)
